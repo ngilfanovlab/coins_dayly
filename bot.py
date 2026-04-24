@@ -216,6 +216,10 @@ async def parse_with_claude(text: str) -> dict | None:
                 },
             )
         data = resp.json()
+        logger.info(f"Anthropic response status: {resp.status_code}")
+        if resp.status_code != 200:
+            logger.error(f"Anthropic error: {data}")
+            return None
         raw = data["content"][0]["text"].strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw)
