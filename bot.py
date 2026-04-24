@@ -274,7 +274,8 @@ def parse_text(text: str) -> dict | None:
     note_text = re.sub(r'\d+[.,]?\d*', '', text_lower)
     note_text = re.sub(r'\b(qar|usd|rub|руб|рублей|долл)\b', '', note_text)
     note_text = note_text.replace(best_kw, '')
-    note_text = re.sub(r'\s+', ' ', note_text).strip(" .,")
+    note_text = re.sub(r'\b\w{1,2}\b', '', note_text)
+    note_text = re.sub(r'\s+', ' ', note_text).strip(' .,')
 
     return {
         "amount": amount,
