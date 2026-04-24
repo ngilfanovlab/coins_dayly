@@ -205,7 +205,7 @@ def add_row(date, amount, currency, category, subcategory, note):
 
 def get_stats():
     sheet = get_sheet()
-    rows = sheet.get_all_records()
+    rows = sheet.get_all_records(numericise_ignore=["all"])
     if not rows:
         return None
     now = datetime.now()
