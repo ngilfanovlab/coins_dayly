@@ -3,6 +3,9 @@ import os
 import json
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+QATAR_TZ = ZoneInfo("Asia/Qatar")
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 
@@ -208,7 +211,7 @@ def get_stats():
     rows = sheet.get_all_records(numericise_ignore=["all"])
     if not rows:
         return None
-    now = datetime.now()
+    now = datetime.now(QATAR_TZ)
     ym = now.strftime("%Y-%m")
     month_rows = [r for r in rows if str(r.get("Дата", "")).startswith(ym)]
 
@@ -386,7 +389,7 @@ async def quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "quick_save":
         parsed = context.user_data.get("quick_parsed", {})
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = datetime.now(QATAR_TZ).strftime("%Y-%m-%d")
         try:
             add_row(date, parsed["amount"], parsed["currency"], parsed["category"], parsed["subcategory"], parsed.get("note", ""))
             amount_qar = round(parsed["amount"] * RATES.get(parsed["currency"], 1), 2)
@@ -536,7 +539,7 @@ async def get_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return SUBCATEGORY
     note = "" if update.message.text == SKIP else update.message.text.strip()
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = datetime.now(QATAR_TZ).strftime("%Y-%m-%d")
     d = context.user_data
     amount_qar = round(d["amount"] * RATES.get(d["currency"], 1), 2)
     try:
@@ -588,7 +591,7 @@ async def month_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await update.message.reply_text("Пока нет записей.")
             return
-        now = datetime.now()
+        now = datetime.now(QATAR_TZ)
         month_name = now.strftime("%B %Y")
         top_text = "\n".join([f"  {cat}: {round(amt)} QAR" for cat, amt in s["top"]])
         await update.message.reply_text(
