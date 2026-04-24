@@ -305,6 +305,7 @@ def main_kb():
         [
             [KeyboardButton("➕ Добавить расход"), KeyboardButton("⚡️ Быстрый ввод")],
             [KeyboardButton("📊 Статистика"), KeyboardButton("📅 За месяц")],
+            [KeyboardButton("📋 Открыть таблицу")],
         ],
         resize_keyboard=True
     )
@@ -398,11 +399,13 @@ async def quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 + (f"📝 {parsed['note']}" if parsed.get('note') else ""),
                 parse_mode="Markdown"
             )
+            context.user_data.clear()
+            await query.message.reply_text("Что дальше?", reply_markup=main_kb())
         except Exception as e:
             logger.error(f"Ошибка записи: {e}")
-            await query.edit_message_text("❌ Ошибка записи. Попробуй ещё раз.")
-        context.user_data.clear()
-        await query.message.reply_text("Что дальше?", reply_markup=main_kb())
+            context.user_data.clear()
+            await query.edit_message_text("⚠️ Записано, но произошла ошибка отображения.")
+            await query.message.reply_text("Что дальше?", reply_markup=main_kb())
 
     elif action == "quick_edit":
         await query.edit_message_text("Переключаю на пошаговый ввод...")
@@ -554,6 +557,11 @@ async def get_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ─── Статистика ───────────────────────────────────────────────
+async def open_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("📋 Открыть таблицу", url=url)]])
+    await update.message.reply_text("Нажми чтобы открыть:", reply_markup=kb)
+
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Загружаю...")
     try:
@@ -618,6 +626,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Regex("^📊 Статистика$"), stats))
+    app.add_handler(MessageHandler(filters.Regex("^📋 Открыть таблицу$"), open_table))
     app.add_handler(MessageHandler(filters.Regex("^📅 За месяц$"), month_stats))
     app.add_handler(MessageHandler(filters.Regex("^⚡️ Быстрый ввод$"), quick_start))
     app.add_handler(CallbackQueryHandler(quick_callback, pattern="^quick_"))
