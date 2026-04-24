@@ -158,7 +158,12 @@ def get_stats():
 
     def to_qar(r):
         try:
-            return float(r["Сумма в QAR"]) if r.get("Сумма в QAR") else float(r["Сумма"]) * RATES.get(r["Валюта"], 1)
+            def parse_num(v):
+                return float(str(v).replace(",", ".").replace(" ", "")) if v else 0
+            qar = r.get("Сумма в QAR")
+            if qar:
+                return parse_num(qar)
+            return parse_num(r["Сумма"]) * RATES.get(r["Валюта"], 1)
         except:
             return 0
 
