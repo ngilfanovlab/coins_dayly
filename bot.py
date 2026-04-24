@@ -265,9 +265,15 @@ def parse_text(text: str) -> dict | None:
     if not category:
         return None
 
-    # Комментарий — текст без суммы и валюты
+    # Комментарий — текст без суммы, валюты и ключевых слов
     note_text = re.sub(r'\d+[.,]?\d*', '', text_lower)
-    note_text = re.sub(r'\b(qar|usd|rub|руб|рублей|долл)\b', '', note_text).strip(" .,")
+    note_text = re.sub(r'\b(qar|usd|rub|руб|рублей|долл)\b', '', note_text)
+    # Убираем ключевое слово которое сработало
+    for kw in sorted(KEYWORDS.keys(), key=len, reverse=True):
+        if kw in note_text:
+            note_text = note_text.replace(kw, '')
+            break
+    note_text = re.sub(r'\s+', ' ', note_text).strip(" .,")
 
     return {
         "amount": amount,
