@@ -255,24 +255,25 @@ def parse_text(text: str) -> dict | None:
     elif any(w in text_lower for w in ["usd", "долл", "$", "бакс"]):
         currency = "USD"
 
-    # Ищем категорию по ключевым словам (сначала длинные фразы)
-    category, subcategory = None, None
-    for kw in sorted(KEYWORDS.keys(), key=len, reverse=True):
-        if kw in text_lower:
-            category, subcategory = KEYWORDS[kw]
-            break
+    # Ищем все совпадения с позицией в тексте, берём самое раннее
+    matches = []
+    for kw in KEYWORDS.keys():
+        pos = text_lower.find(kw)
+        if pos != -1:
+            matches.append((pos, len(kw), kw))
 
-    if not category:
+    if not matches:
         return None
 
-    # Комментарий — текст без суммы, валюты и ключевых слов
+    # Берём ключевое слово которое встречается первым в тексте
+    matches.sort(key=lambda x: (x[0], -x[1]))
+    _, _, best_kw = matches[0]
+    category, subcategory = KEYWORDS[best_kw]
+
+    # Комментарий — текст без суммы, валюты и первого ключевого слова
     note_text = re.sub(r'\d+[.,]?\d*', '', text_lower)
     note_text = re.sub(r'\b(qar|usd|rub|руб|рублей|долл)\b', '', note_text)
-    # Убираем ключевое слово которое сработало
-    for kw in sorted(KEYWORDS.keys(), key=len, reverse=True):
-        if kw in note_text:
-            note_text = note_text.replace(kw, '')
-            break
+    note_text = note_text.replace(best_kw, '')
     note_text = re.sub(r'\s+', ' ', note_text).strip(" .,")
 
     return {
