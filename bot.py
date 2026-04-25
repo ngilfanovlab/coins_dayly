@@ -9,6 +9,7 @@ QATAR_TZ = ZoneInfo("Asia/Qatar")
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 
+import httpx
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -178,13 +179,34 @@ KEYWORDS = {
     "отель": ("🎬 Развлечения", "Отель / жильё в поездке"),
     "гостиниц": ("🎬 Развлечения", "Отель / жильё в поездке"),
     # Другое
+    "психолог": ("💊 Здоровье", "Врач / клиника"),
+    "психотерапевт": ("💊 Здоровье", "Врач / клиника"),
+    "терапевт": ("💊 Здоровье", "Врач / клиника"),
     "подарок": ("🎁 Другое", "Подарки"),
     "штраф": ("🎁 Другое", "Штрафы"),
 }
 
-CURRENCIES = ["QAR 🇶🇦", "USD 🇺🇸", "RUB 🇷🇺"]
-CURRENCY_MAP = {"QAR 🇶🇦": "QAR", "USD 🇺🇸": "USD", "RUB 🇷🇺": "RUB"}
-RATES = {"QAR": 1, "USD": 3.64, "RUB": 0.039}
+CURRENCIES = ["QAR 🇶🇦", "USD 🇺🇸", "RUB 🇷🇺", "EUR 🇪🇺"]
+CURRENCY_MAP = {"QAR 🇶🇦": "QAR", "USD 🇺🇸": "USD", "RUB 🇷🇺": "RUB", "EUR 🇪🇺": "EUR"}
+RATES = {"QAR": 1, "USD": 3.64, "RUB": 0.039, "EUR": 3.95}
+
+async def fetch_rates() -> dict:
+    """Получить актуальные курсы к QAR через frankfurter.app"""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get("https://api.frankfurter.app/latest?from=QAR&to=USD,EUR,RUB")
+            if resp.status_code == 200:
+                data = resp.json()
+                rates = data.get("rates", {})
+                return {
+                    "QAR": 1,
+                    "USD": round(1 / rates["USD"], 4) if "USD" in rates else 3.64,
+                    "EUR": round(1 / rates["EUR"], 4) if "EUR" in rates else 3.95,
+                    "RUB": round(1 / rates["RUB"], 4) if "RUB" in rates else 0.039,
+                }
+    except Exception as e:
+        logger.warning(f"Не удалось получить курсы: {e}, использую резервные")
+    return {"QAR": 1, "USD": 3.64, "RUB": 0.039, "EUR": 3.95}
 
 AMOUNT, CURRENCY, CATEGORY, SUBCATEGORY, NOTE = range(5)
 BACK = "◀️ Назад"
@@ -258,6 +280,8 @@ def parse_text(text: str) -> dict | None:
     currency = "QAR"
     if any(w in text_lower for w in ["руб", "rub", "рублей", "р."]):
         currency = "RUB"
+    elif any(w in text_lower for w in ["eur", "евро", "€"]):
+        currency = "EUR"
     elif any(w in text_lower for w in ["usd", "долл", "$", "бакс"]):
         currency = "USD"
 
@@ -615,6 +639,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ─── Запуск ──────────────────────────────────────────────────
+async def global_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Отменено. Выбери действие:",
+        reply_markup=main_kb()
+    )
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -635,10 +666,17 @@ def main():
     app.add_handler(MessageHandler(filters.Regex("^📋 Открыть таблицу$"), open_table))
     app.add_handler(MessageHandler(filters.Regex("^📅 За месяц$"), month_stats))
     app.add_handler(MessageHandler(filters.Regex("^⚡️ Быстрый ввод$"), quick_start))
+    app.add_handler(MessageHandler(filters.Regex("^❌ Отмена$"), global_cancel))
     app.add_handler(CallbackQueryHandler(quick_callback, pattern="^quick_"))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quick_text))
 
+    async def post_init(application):
+        global RATES
+        RATES = await fetch_rates()
+        logger.info(f"Курсы загружены: {RATES}")
+
+    app.post_init = post_init
     logger.info("Бот запущен")
     app.run_polling()
 
