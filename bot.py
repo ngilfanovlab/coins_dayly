@@ -122,10 +122,14 @@ async def fetch_rates() -> dict:
         logger.warning(f"Не удалось получить курсы: {e}")
     return {"QAR": 1, "USD": 3.64, "RUB": 0.039, "EUR": 3.95}
 
-async def refresh_rates_job(context: ContextTypes.DEFAULT_TYPE):
-    global RATES
-    RATES = await fetch_rates()
-    logger.info(f"Курсы обновлены: {RATES}")
+async def rates_refresh_loop():
+    """Обновляет курсы каждые 6 часов без job-queue"""
+    import asyncio
+    while True:
+        await asyncio.sleep(6 * 3600)
+        global RATES
+        RATES = await fetch_rates()
+        logger.info(f"Курсы обновлены: {RATES}")
 
 AMOUNT, CURRENCY, CATEGORY, SUBCATEGORY, NOTE = range(5)
 BACK = "◀️ Назад"
@@ -555,12 +559,12 @@ def main():
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quick_text))
 
-    app.job_queue.run_repeating(refresh_rates_job, interval=6 * 3600, first=10)
-
     async def post_init(application):
+        import asyncio
         global RATES
         RATES = await fetch_rates()
         logger.info(f"Курсы загружены при старте: {RATES}")
+        asyncio.create_task(rates_refresh_loop())
 
     app.post_init = post_init
     logger.info("Бот запущен")
