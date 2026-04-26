@@ -255,8 +255,9 @@ def main_kb():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("➕ Добавить расход"), KeyboardButton("⚡️ Быстрый ввод")],
-            [KeyboardButton("📊 Статистика"), KeyboardButton("📅 За месяц")],
-            [KeyboardButton("🕐 Последние записи"), KeyboardButton("📋 Открыть таблицу")],
+            [KeyboardButton("📅 За сегодня"), KeyboardButton("📅 За месяц")],
+            [KeyboardButton("📊 По категориям"), KeyboardButton("🕐 Последние записи")],
+            [KeyboardButton("📋 Открыть таблицу")],
         ],
         resize_keyboard=True
     )
@@ -489,20 +490,69 @@ async def open_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Нажми чтобы открыть:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 Открыть таблицу", url=url)]]))
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def today_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Загружаю...")
     try:
-        s = get_stats()
-        if not s:
-            await update.message.reply_text("Пока нет записей. Добавь первый расход!")
+        sheet = get_sheet()
+        rows = sheet.get_all_records(numericise_ignore=["all"])
+        today = datetime.now(QATAR_TZ).strftime("%Y-%m-%d")
+        today_rows = [r for r in rows if str(r.get("Дата", "")) == today]
+        if not today_rows:
+            await update.message.reply_text(f"📅 Сегодня ({today}) расходов ещё нет.", reply_markup=main_kb())
             return
-        top_text = "\n".join([f"  {cat}: {round(amt)} QAR" for cat, amt in s["top"]])
-        await update.message.reply_text(
-            f"📊 *Статистика за всё время*\n\nВсего: *{s['total']} QAR* ({s['count']} записей)\n\n🏆 Топ категорий этого месяца:\n{top_text}",
-            parse_mode="Markdown", reply_markup=main_kb()
-        )
+        def to_qar(r):
+            try:
+                v = r.get("Сумма в QAR") or r.get("Сумма", 0)
+                return float(str(v).replace(",", ".").replace(" ", ""))
+            except: return 0
+        total = sum(to_qar(r) for r in today_rows)
+        lines = []
+        for r in today_rows:
+            amt = r.get("Сумма", "")
+            cur = r.get("Валюта", "")
+            sub = r.get("Подкатегория", "")
+            note = r.get("Комментарий", "")
+            qar = round(to_qar(r))
+            line = f"• {sub} — {amt} {cur}" + (f" (~{qar} QAR)" if cur != "QAR" else "") + (f" _{note}_" if note else "")
+            lines.append(line)
+        text = f"📅 *Сегодня {today}*\n\n" + "\n".join(lines) + f"\n\n💰 *Итого: {round(total)} QAR*"
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка today: {e}")
+        await update.message.reply_text("❌ Ошибка загрузки.")
+
+async def categories_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Загружаю...")
+    try:
+        sheet = get_sheet()
+        rows = sheet.get_all_records(numericise_ignore=["all"])
+        now = datetime.now(QATAR_TZ)
+        ym = now.strftime("%Y-%m")
+        month_rows = [r for r in rows if str(r.get("Дата", "")).startswith(ym)]
+        if not month_rows:
+            await update.message.reply_text("За этот месяц нет записей.", reply_markup=main_kb())
+            return
+        def to_qar(r):
+            try:
+                v = r.get("Сумма в QAR") or r.get("Сумма", 0)
+                return float(str(v).replace(",", ".").replace(" ", ""))
+            except: return 0
+        cat_totals = {}
+        for r in month_rows:
+            cat = r.get("Категория", "Другое")
+            cat_totals[cat] = cat_totals.get(cat, 0) + to_qar(r)
+        total = sum(cat_totals.values())
+        sorted_cats = sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)
+        lines = []
+        for cat, amt in sorted_cats:
+            pct = round(amt / total * 100) if total else 0
+            bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+            lines.append(f"{cat}\n`{bar}` {round(amt)} QAR ({pct}%)")
+        month_name = now.strftime("%B %Y")
+        text = f"📊 *По категориям — {month_name}*\n\n" + "\n\n".join(lines) + f"\n\n💰 *Итого: {round(total)} QAR*"
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+    except Exception as e:
+        logger.error(f"Ошибка categories: {e}")
         await update.message.reply_text("❌ Ошибка загрузки.")
 
 async def month_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -548,9 +598,10 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("last", cmd_last))
-    app.add_handler(MessageHandler(filters.Regex("^📊 Статистика$"), stats))
-    app.add_handler(MessageHandler(filters.Regex("^📋 Открыть таблицу$"), open_table))
+    app.add_handler(MessageHandler(filters.Regex("^📅 За сегодня$"), today_stats))
     app.add_handler(MessageHandler(filters.Regex("^📅 За месяц$"), month_stats))
+    app.add_handler(MessageHandler(filters.Regex("^📊 По категориям$"), categories_stats))
+    app.add_handler(MessageHandler(filters.Regex("^📋 Открыть таблицу$"), open_table))
     app.add_handler(MessageHandler(filters.Regex("^⚡️ Быстрый ввод$"), quick_start))
     app.add_handler(MessageHandler(filters.Regex("^🕐 Последние записи$"), last_entries))
     app.add_handler(MessageHandler(filters.Regex("^❌ Отмена$"), global_cancel))
