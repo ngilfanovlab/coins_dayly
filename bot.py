@@ -505,16 +505,17 @@ async def today_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 v = r.get("Сумма в QAR") or r.get("Сумма", 0)
                 return float(str(v).replace(",", ".").replace(" ", ""))
             except: return 0
-        total = sum(to_qar(r) for r in today_rows)
-        lines = []
+        # Группируем по категориям
+        cat_totals = {}
         for r in today_rows:
-            amt = r.get("Сумма", "")
-            cur = r.get("Валюта", "")
-            sub = r.get("Подкатегория", "")
-            note = r.get("Комментарий", "")
-            qar = round(to_qar(r))
-            line = f"• {sub} — {amt} {cur}" + (f" (~{qar} QAR)" if cur != "QAR" else "") + (f" _{note}_" if note else "")
-            lines.append(line)
+            cat = r.get("Категория", "Другое")
+            cat_totals[cat] = cat_totals.get(cat, 0) + to_qar(r)
+        total = sum(cat_totals.values())
+        sorted_cats = sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)
+        lines = []
+        for cat, amt in sorted_cats:
+            pct = round(amt / total * 100) if total else 0
+            lines.append(f"• {cat} — *{round(amt)} QAR* ({pct}%)")
         text = f"📅 *Сегодня {today}*\n\n" + "\n".join(lines) + f"\n\n💰 *Итого: {round(total)} QAR*"
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
     except Exception as e:
