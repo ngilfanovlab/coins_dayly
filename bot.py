@@ -102,6 +102,176 @@ KEYWORDS = {
 }
 
 CURRENCIES = ["QAR 🇶🇦", "USD 🇺🇸", "RUB 🇷🇺", "EUR 🇪🇺"]
+
+INCOME_SOURCES = ["💼 Зарплата", "📷 Фриланс фото", "🎁 Другой доход"]
+INCOME_SOURCE_MAP = {
+    "💼 Зарплата": "Зарплата",
+    "📷 Фриланс фото": "Фриланс фото",
+    "🎁 Другой доход": "Другой доход",
+}
+
+INC_AMOUNT, INC_CURRENCY, INC_SOURCE, INC_NOTE = range(10, 14)
+
+def get_income_sheet():
+    creds_info = json.loads(GOOGLE_CREDS_JSON)
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    try:
+        sheet = spreadsheet.worksheet("Доходы")
+    except:
+        sheet = spreadsheet.add_worksheet(title="Доходы", rows=1000, cols=7)
+    if not sheet.row_values(1):
+        sheet.append_row(["Дата", "Сумма", "Валюта", "Источник", "Комментарий", "Сумма в QAR"])
+    return sheet
+
+def add_income_row(date, amount, currency, source, note):
+    sheet = get_income_sheet()
+    amount_qar = round(amount * RATES.get(currency, 1), 2)
+    sheet.append_row([date, amount, currency, source, note, amount_qar])
+
+def get_balance_stats():
+    # Расходы
+    exp_sheet = get_sheet()
+    exp_rows = exp_sheet.get_all_records(numericise_ignore=["all"])
+    # Доходы
+    inc_sheet = get_income_sheet()
+    inc_rows = inc_sheet.get_all_records(numericise_ignore=["all"])
+
+    now = datetime.now(QATAR_TZ)
+    ym = now.strftime("%Y-%m")
+
+    def to_qar(r):
+        try:
+            v = r.get("Сумма в QAR") or r.get("Сумма", 0)
+            return float(str(v).replace(",", ".").replace(" ", ""))
+        except: return 0
+
+    month_exp = [r for r in exp_rows if str(r.get("Дата", "")).startswith(ym)]
+    month_inc = [r for r in inc_rows if str(r.get("Дата", "")).startswith(ym)]
+
+    total_exp = sum(to_qar(r) for r in month_exp)
+    total_inc = sum(to_qar(r) for r in month_inc)
+    freelance_inc = sum(to_qar(r) for r in month_inc if r.get("Источник") == "Фриланс фото")
+    freelance_exp = sum(to_qar(r) for r in month_exp if r.get("Категория") == "📷 Фото / фриланс")
+
+    return {
+        "total_inc": round(total_inc),
+        "total_exp": round(total_exp),
+        "balance": round(total_inc - total_exp),
+        "freelance_inc": round(freelance_inc),
+        "freelance_exp": round(freelance_exp),
+        "freelance_profit": round(freelance_inc - freelance_exp),
+        "month": now.strftime("%B %Y"),
+    }
+
+# ─── Добавить доход ───────────────────────────────────────────
+async def income_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["mode"] = "income"
+    await update.message.reply_text(
+        "💰 *Добавить доход*\n\n*Шаг 1/4* — Введи сумму:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton(CANCEL)]], resize_keyboard=True)
+    )
+    return INC_AMOUNT
+
+async def inc_get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CANCEL:
+        return await cancel(update, context)
+    try:
+        amount = float(update.message.text.replace(",", ".").strip())
+        if amount <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("Введи корректную сумму, например: 1000 или 3650.50")
+        return INC_AMOUNT
+    context.user_data["inc_amount"] = amount
+    kb = make_kb(CURRENCIES, cols=3, extra_rows=[[KeyboardButton(CANCEL)]])
+    await update.message.reply_text(
+        "💱 *Шаг 2/4* — Выбери валюту:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
+    return INC_CURRENCY
+
+async def inc_get_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CANCEL: return await cancel(update, context)
+    cur = CURRENCY_MAP.get(update.message.text.strip())
+    if not cur:
+        await update.message.reply_text("Выбери из кнопок 👆")
+        return INC_CURRENCY
+    context.user_data["inc_currency"] = cur
+    kb = make_kb(INCOME_SOURCES, cols=1, extra_rows=[[KeyboardButton(CANCEL)]])
+    await update.message.reply_text(
+        "📂 *Шаг 3/4* — Источник дохода:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
+    return INC_SOURCE
+
+async def inc_get_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CANCEL: return await cancel(update, context)
+    source_raw = update.message.text.strip()
+    source = INCOME_SOURCE_MAP.get(source_raw)
+    if not source:
+        await update.message.reply_text("Выбери из кнопок 👆")
+        return INC_SOURCE
+    context.user_data["inc_source"] = source
+    await update.message.reply_text(
+        "📝 *Шаг 4/4* — Комментарий (необязательно):\n_Например: зарплата за апрель, съёмка ресторан Al Mourjan_",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton(SKIP)], [KeyboardButton(CANCEL)]], resize_keyboard=True)
+    )
+    return INC_NOTE
+
+async def inc_get_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == CANCEL: return await cancel(update, context)
+    note = "" if update.message.text == SKIP else update.message.text.strip()
+    date = datetime.now(QATAR_TZ).strftime("%Y-%m-%d")
+    d = context.user_data
+    amount_qar = round(d["inc_amount"] * RATES.get(d["inc_currency"], 1), 2)
+    try:
+        add_income_row(date, d["inc_amount"], d["inc_currency"], d["inc_source"], note)
+        await update.message.reply_text(
+            f"✅ *Доход записан!*\n\n"
+            f"📅 {date}\n"
+            f"💰 {d['inc_amount']} {d['inc_currency']} (~{amount_qar} QAR)\n"
+            f"📂 {d['inc_source']}\n"
+            + (f"📝 {note}" if note else ""),
+            parse_mode="Markdown",
+            reply_markup=main_kb()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка записи дохода: {e}")
+        await update.message.reply_text("❌ Ошибка записи.", reply_markup=main_kb())
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# ─── Баланс ──────────────────────────────────────────────────
+async def balance_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Загружаю...")
+    try:
+        s = get_balance_stats()
+        balance_emoji = "📈" if s["balance"] >= 0 else "📉"
+        balance_sign = "+" if s["balance"] >= 0 else ""
+        freelance_emoji = "📈" if s["freelance_profit"] >= 0 else "📉"
+        text = (
+            f"💼 *Баланс — {s['month']}*\n\n"
+            f"💰 Доходы: *{s['total_inc']} QAR*\n"
+            f"💸 Расходы: *{s['total_exp']} QAR*\n"
+            f"{balance_emoji} Остаток: *{balance_sign}{s['balance']} QAR*\n\n"
+            f"─────────────────\n"
+            f"📷 *Фриланс фото:*\n"
+            f"  Заработано: {s['freelance_inc']} QAR\n"
+            f"  Расходы: {s['freelance_exp']} QAR\n"
+            f"  {freelance_emoji} Прибыль: *{s['freelance_profit']} QAR*"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_kb())
+    except Exception as e:
+        logger.error(f"Ошибка баланса: {e}")
+        await update.message.reply_text("❌ Ошибка загрузки.")
+
 CURRENCY_MAP = {"QAR 🇶🇦": "QAR", "USD 🇺🇸": "USD", "RUB 🇷🇺": "RUB", "EUR 🇪🇺": "EUR"}
 RATES = {"QAR": 1, "USD": 3.64, "RUB": 0.039, "EUR": 3.95}
 
@@ -254,9 +424,10 @@ def make_kb(items, cols=2, extra_rows=None):
 def main_kb():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("➕ Добавить расход"), KeyboardButton("⚡️ Быстрый ввод")],
-            [KeyboardButton("📅 За сегодня"), KeyboardButton("📅 За месяц")],
-            [KeyboardButton("📊 По категориям"), KeyboardButton("🕐 Последние записи")],
+            [KeyboardButton("➕ Добавить расход"), KeyboardButton("💰 Добавить доход")],
+            [KeyboardButton("⚡️ Быстрый ввод"), KeyboardButton("📅 За сегодня")],
+            [KeyboardButton("📅 За месяц"), KeyboardButton("📊 По категориям")],
+            [KeyboardButton("💼 Баланс"), KeyboardButton("🕐 Последние записи")],
             [KeyboardButton("📋 Открыть таблицу")],
         ],
         resize_keyboard=True
@@ -597,9 +768,22 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    income_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💰 Добавить доход$"), income_start)],
+        states={
+            INC_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, inc_get_amount)],
+            INC_CURRENCY: [MessageHandler(filters.TEXT & ~filters.COMMAND, inc_get_currency)],
+            INC_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, inc_get_source)],
+            INC_NOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, inc_get_note)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("last", cmd_last))
+    app.add_handler(income_conv)
     app.add_handler(MessageHandler(filters.Regex("^📅 За сегодня$"), today_stats))
+    app.add_handler(MessageHandler(filters.Regex("^💼 Баланс$"), balance_stats))
     app.add_handler(MessageHandler(filters.Regex("^📅 За месяц$"), month_stats))
     app.add_handler(MessageHandler(filters.Regex("^📊 По категориям$"), categories_stats))
     app.add_handler(MessageHandler(filters.Regex("^📋 Открыть таблицу$"), open_table))
